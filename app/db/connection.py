@@ -2,6 +2,9 @@
 
 배치 쓰기와 API 읽기가 동시에 일어나므로 WAL 이 필수다.
 읽기/쓰기 커넥션을 분리해 "요청 경로에서 쓰기 금지"를 구조로 못 박는다.
+
+커넥션은 연 스레드 안에서만 쓰고 그 스레드에서 닫는다. FastAPI 의존성으로
+주입하지 않는 이유는 :func:`read_connection` 아래 주석에 적어 두었다.
 """
 
 import sqlite3
@@ -16,7 +19,8 @@ def _connect(db_path: Path) -> sqlite3.Connection:
     """커넥션 하나를 연다.
 
     ``check_same_thread`` 는 기본값(True)을 유지한다. 커넥션을 스레드 사이로
-    넘기지 않고 요청마다 새로 여는 것이 이 설계의 전제다.
+    넘기지 않고 요청마다 새로 여는 것이 이 설계의 전제다. 이 가드를 끄면
+    스레드를 넘나드는 사용이 에러 대신 조용한 데이터 경합으로 바뀐다.
     """
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path, timeout=get_settings().sqlite_busy_timeout_ms / 1000)
@@ -55,7 +59,15 @@ def apply_reader_pragmas(conn: sqlite3.Connection) -> None:
 
 @contextmanager
 def read_connection() -> Iterator[sqlite3.Connection]:
-    """API 요청용 읽기 전용 커넥션. 커밋하지 않는다."""
+    """API 요청용 읽기 전용 커넥션. 커밋하지 않는다.
+
+    반드시 핸들러 본문 안에서 열고 닫는다. FastAPI 의존성(``Depends``)으로
+    주입하면 안 된다 — 동기 제너레이터 의존성의 진입/본문/정리를 FastAPI 가
+    각각 별도의 ``anyio.to_thread.run_sync`` 로 돌리기 때문에, 동시 요청이
+    몰리면 커넥션을 연 스레드와 쓰는 스레드가 갈린다. 반대로 동기 핸들러
+    본문은 통째로 한 워커 스레드에서 실행되므로 열기·조회·닫기가 한 스레드에
+    묶인다.
+    """
     conn = _connect(get_settings().database_path)
     try:
         apply_reader_pragmas(conn)
@@ -81,9 +93,3 @@ def write_connection() -> Iterator[sqlite3.Connection]:
         raise
     finally:
         conn.close()
-
-
-def get_db() -> Iterator[sqlite3.Connection]:
-    """FastAPI 의존성. 요청 하나당 읽기 커넥션 하나."""
-    with read_connection() as conn:
-        yield conn

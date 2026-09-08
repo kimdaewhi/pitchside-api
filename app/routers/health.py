@@ -1,10 +1,8 @@
 """헬스 엔드포인트."""
 
-import sqlite3
+from fastapi import APIRouter
 
-from fastapi import APIRouter, Depends
-
-from app.db.connection import get_db
+from app.db.connection import read_connection
 from app.schemas.health import HealthStatus, IngestHealthResponse
 from app.services import health as health_service
 
@@ -18,6 +16,7 @@ def health() -> HealthStatus:
 
 
 @router.get("/health/ingest", response_model=IngestHealthResponse)
-def ingest_health(conn: sqlite3.Connection = Depends(get_db)) -> IngestHealthResponse:
+def ingest_health() -> IngestHealthResponse:
     """리그별 마지막 수집 성공 시각."""
-    return health_service.get_ingest_health(conn)
+    with read_connection() as conn:
+        return health_service.get_ingest_health(conn)
