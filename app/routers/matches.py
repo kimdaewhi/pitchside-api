@@ -2,11 +2,12 @@
 
 import sqlite3
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 
 from app.db.connection import get_db
 from app.routers.deps import require_league
 from app.schemas.matches import MatchesResponse
+from app.services import matches as matches_service
 
 router = APIRouter(prefix="/competitions", tags=["matches"])
 
@@ -19,6 +20,6 @@ def list_matches(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> MatchesResponse:
     """현재 시즌 경기 목록."""
-    require_league(code)  # 404 검증
-    # TODO: services.matches.list_matches
-    raise HTTPException(status_code=501, detail="not implemented")
+    return matches_service.list_matches(
+        conn, require_league(code), matchday=matchday, status=status
+    )

@@ -2,10 +2,11 @@
 
 import sqlite3
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 
 from app.db.connection import get_db
 from app.schemas.health import HealthStatus, IngestHealthResponse
+from app.services import health as health_service
 
 router = APIRouter(tags=["health"])
 
@@ -19,5 +20,4 @@ def health() -> HealthStatus:
 @router.get("/health/ingest", response_model=IngestHealthResponse)
 def ingest_health(conn: sqlite3.Connection = Depends(get_db)) -> IngestHealthResponse:
     """리그별 마지막 수집 성공 시각."""
-    # TODO: repositories.ingest_runs.last_success_per_league
-    raise HTTPException(status_code=501, detail="not implemented")
+    return health_service.get_ingest_health(conn)

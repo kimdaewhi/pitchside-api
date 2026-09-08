@@ -7,10 +7,12 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from app.config import get_settings
 from app.routers import api_router
+from app.services.common import InvalidFilterError, NotIngestedError
 
 
 @asynccontextmanager
@@ -26,6 +28,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
 
+async def _not_ingested_handler(request: Request, exc: Exception) -> JSONResponse:
+    """아직 수집되지 않은 대상.
+
+    코드가 틀린 것(레지스트리에 없음)과 구분해서 404 를 낸다.
+    여기서 외부를 호출해 메우지 않는다.
+    """
+    return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+
+async def _invalid_filter_handler(request: Request, exc: Exception) -> JSONResponse:
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Pitchside API",
@@ -33,6 +48,9 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+    # 서비스 계층은 HTTP 를 모른다. 도메인 예외를 상태 코드로 옮기는 건 여기의 일이다.
+    app.add_exception_handler(NotIngestedError, _not_ingested_handler)
+    app.add_exception_handler(InvalidFilterError, _invalid_filter_handler)
     app.include_router(api_router)
     return app
 
