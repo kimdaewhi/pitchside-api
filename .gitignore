@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# 환경변수 — API 키는 절대 커밋하지 않는다
+.env
+.env.local
+
+# SQLite (WAL 이라 -wal / -shm 동반 파일이 생긴다)
+data/
+*.db
+*.db-wal
+*.db-shm
