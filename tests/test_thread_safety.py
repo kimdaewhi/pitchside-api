@@ -23,6 +23,8 @@ DB_ENDPOINTS = [
     "/competitions/PL/teams/57/form",
     "/teams/57",
     "/teams/57/vs/61",
+    # 한 요청에 쿼리를 여섯 번 낸다. 커넥션 스레드 구속을 가장 세게 검증한다.
+    "/matches/560542",
     "/health/ingest",
 ]
 

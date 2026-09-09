@@ -5,10 +5,16 @@ seeded_db 에는 PL 만 들어 있다. 나머지 리그는 "레지스트리에�
 
 from fastapi.testclient import TestClient
 
+from tests.conftest import SCHEDULED_MATCH_ID
+
 # 샘플에 등장하는 팀
 MAN_CITY = 65  # 순위표에만 있고 경기에는 없다
 ARSENAL = 57  # 560542 홈 승 (3-0 vs Coventry)
 COVENTRY = 1076
+
+# 샘플에 등장하는 경기. 둘 다 1라운드다.
+ARSENAL_WIN = 560542  # ARS 3-0 COV, 2026-08-21
+OTHER_MATCHDAY_1 = 560543  # 2026-08-22
 
 
 # --- 대회 목록 ---
@@ -185,6 +191,109 @@ def test_head_to_head_without_meetings_is_zeroed(api: TestClient) -> None:
     assert body["summary"]["played"] == 0
     assert body["summary"]["goals_for"] == 0
     assert body["recent_matches"] == []
+
+
+# --- 경기 상세 ---
+
+
+def test_match_detail_carries_the_match_itself(api: TestClient) -> None:
+    body = api.get(f"/matches/{ARSENAL_WIN}").json()
+    assert body["match"]["id"] == ARSENAL_WIN
+    assert body["match"]["status"] == "FINISHED"
+    assert body["match"]["matchday"] == 1
+    assert body["match"]["score"]["full_time_home"] == 3
+    assert body["competition"]["code"] == "PL"
+    assert body["season"]["id"] == 2502
+
+
+def test_match_detail_attaches_standings(api: TestClient) -> None:
+    home = api.get(f"/matches/{ARSENAL_WIN}").json()["home"]
+    assert home["team"]["id"] == ARSENAL
+    assert home["standing"]["position"] == 2
+    assert home["standing"]["points"] == 9
+
+
+def test_match_detail_standing_is_null_for_team_outside_the_table(api: TestClient) -> None:
+    """순위표에 없는 팀은 null 이다. 0으로 지어내지 않는다."""
+    away = api.get(f"/matches/{ARSENAL_WIN}").json()["away"]
+    assert away["team"]["id"] == COVENTRY
+    assert away["standing"] is None
+
+
+def test_match_detail_form_excludes_the_match_itself(api: TestClient) -> None:
+    """폼은 그 경기 이전 기준이다. 자기 자신이 들어가면 순환이다."""
+    body = api.get(f"/matches/{ARSENAL_WIN}").json()
+    assert body["home"]["form"] == []
+    assert body["away"]["form"] == []
+
+
+def test_match_detail_head_to_head_is_before_this_match(api: TestClient) -> None:
+    """유일한 맞대결이 이 경기라 이전 기준이면 비어야 한다."""
+    body = api.get(f"/matches/{ARSENAL_WIN}").json()
+    h2h = body["head_to_head"]
+    assert (h2h["team"]["id"], h2h["opponent"]["id"]) == (ARSENAL, COVENTRY)
+    assert h2h["played"] == 0
+    assert body["recent_meetings"] == []
+
+
+def test_match_detail_same_matchday_excludes_self(api: TestClient) -> None:
+    body = api.get(f"/matches/{ARSENAL_WIN}").json()
+    assert [m["id"] for m in body["same_matchday"]] == [OTHER_MATCHDAY_1]
+
+
+def test_match_detail_uses_snake_case(api: TestClient) -> None:
+    body = api.get(f"/matches/{ARSENAL_WIN}").json()
+    assert "same_matchday" in body and "recent_meetings" in body
+    assert "goal_difference" in body["home"]["standing"]
+
+
+def test_unknown_match_is_404(api: TestClient) -> None:
+    response = api.get("/matches/999999")
+    assert response.status_code == 404
+    assert "저장된 경기가 아닙니다" in response.json()["detail"]
+
+
+# --- 경기 상세: 예정 경기 ---
+
+
+def test_scheduled_match_detail_has_null_score(api_with_scheduled: TestClient) -> None:
+    """예정 경기는 스코어 다섯 필드가 전부 null 이다. 0으로 채우지 않는다."""
+    match = api_with_scheduled.get(f"/matches/{SCHEDULED_MATCH_ID}").json()["match"]
+    assert match["status"] == "SCHEDULED"
+    assert match["score"] == {
+        "winner": None,
+        "full_time_home": None,
+        "full_time_away": None,
+        "half_time_home": None,
+        "half_time_away": None,
+    }
+
+
+def test_scheduled_match_detail_still_has_context(api_with_scheduled: TestClient) -> None:
+    """치르지 않은 경기여도 순위와 폼은 나온다."""
+    body = api_with_scheduled.get(f"/matches/{SCHEDULED_MATCH_ID}").json()
+    assert body["home"]["standing"]["position"] == 2  # ARS
+    assert body["away"]["standing"]["position"] == 1  # MCI
+    # 8/21 승리가 이 경기(8/29)보다 앞서므로 폼에 잡힌다.
+    assert body["home"]["form"] == ["W"]
+    # MCI 는 순위표에만 있고 치른 경기가 없다.
+    assert body["away"]["form"] == []
+
+
+def test_scheduled_match_detail_has_no_same_matchday_peers(
+    api_with_scheduled: TestClient,
+) -> None:
+    """2라운드에는 이 경기뿐이다. 자기 자신만 빠지면 빈 목록이 된다."""
+    body = api_with_scheduled.get(f"/matches/{SCHEDULED_MATCH_ID}").json()
+    assert body["same_matchday"] == []
+
+
+def test_scheduled_match_does_not_leak_into_form_of_finished_match(
+    api_with_scheduled: TestClient,
+) -> None:
+    """치르지 않은 경기는 어떤 폼에도 들어가지 않는다."""
+    body = api_with_scheduled.get(f"/matches/{ARSENAL_WIN}").json()
+    assert body["home"]["form"] == []
 
 
 # --- 헬스 ---
